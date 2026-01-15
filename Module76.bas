@@ -352,22 +352,24 @@ Private Sub RemplacerTexteParagraphes(ByVal paras As Collection, ByVal traductio
     traductions = Split(traduction, "[|||]")
 
     Dim i As Long
-    ' Boucle sur chaque paragraphe du segment d'origine.
-    For i = 1 To paras.Count
+    ' Boucle en sens inverse pour éviter l'erreur 438.
+    ' En modifiant le document de la fin vers le début, les indices des paragraphes
+    ' non encore traités ne sont pas affectés par les modifications.
+    For i = paras.Count To 1 Step -1
         If i - 1 <= UBound(traductions) Then
             Dim para As Paragraph
             Set para = paras(i)
 
-            ' Supprime le texte original en conservant le formatage du paragraphe.
-            ' para.Range.Text = "" ' Ancienne méthode moins fiable
+            ' S'assure que le paragraphe est toujours valide avant de le modifier.
+            If Not para Is Nothing Then
+                If para.Range.Characters.Count > 1 Then
+                    ' Supprime le contenu existant tout en préservant la marque de paragraphe et son style.
+                    para.Range.Characters(1, para.Range.Characters.Count - 1).Delete
+                End If
 
-            If para.Range.Characters.Count > 1 Then
-                ' Supprime tout sauf la marque de paragraphe
-                 para.Range.Characters(1, para.Range.Characters.Count - 1).Delete
+                ' Insère le texte traduit au début du paragraphe vide.
+                para.Range.InsertBefore Trim(traductions(i - 1))
             End If
-
-            ' Insère le nouveau texte. Le formatage est conservé.
-            para.Range.InsertBefore Trim(traductions(i - 1))
         End If
     Next i
 End Sub
