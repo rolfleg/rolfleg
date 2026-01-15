@@ -66,8 +66,15 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     Application.ScreenUpdating = False ' Désactive le rafraîchissement de l'écran pour la performance.
 
     Dim nomBase As String
-    nomBase = Left(docSource.Name, InStrRev(docSource.Name, ".") - 1)
-    If nomBase = "" Then nomBase = docSource.Name
+    Dim posPoint As Long
+    posPoint = InStrRev(docSource.Name, ".")
+
+    ' Gère le cas où le nom de fichier n'a pas d'extension pour éviter une erreur.
+    If posPoint > 0 Then
+        nomBase = Left(docSource.Name, posPoint - 1)
+    Else
+        nomBase = docSource.Name
+    End If
 
     Dim nouveauNom As String
     nouveauNom = docSource.Path & "\Fr_" & nomBase & ".docx"
@@ -76,48 +83,7 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     ' Copie le document source et travaille sur la copie.
     Set docTraduit = docSource.SaveAs2(FileName:=nouveauNom, AddToRecentFiles:=False)
 
-    ' --- Identification des paragraphes à traduire ---
-    Application.StatusBar = "Analyse du document pour identifier les paragraphes textuels..."
-
-    Dim parasATraduire As New Collection
-    Dim para As Paragraph
-    Dim parasIgnorés As Long
-    Dim i As Long
-    parasIgnorés = 0
-
-    ' Boucle sur tous les paragraphes du document à traduire.
-    For i = 1 To docTraduit.Paragraphs.Count
-        Set para = docTraduit.Paragraphs(i)
-
-        ' On vérifie si le paragraphe contient des formes flottantes (Shapes)
-        ' ou des formes ancrées dans le texte (InlineShapes).
-        If para.Range.InlineShapes.Count > 0 Or para.Range.ShapeRange.Count > 0 Then
-            parasIgnorés = parasIgnorés + 1
-        ' On s'assure aussi que le paragraphe n'est pas vide ou composé uniquement d'espaces.
-        ' La longueur > 1 est pour ignorer les paragraphes qui n'ont que la marque de fin (Chr(13)).
-        ElseIf Len(Trim(para.Range.Text)) > 1 Then
-            parasATraduire.Add para
-        Else
-            ' Les paragraphes vides sont également ignorés.
-            parasIgnorés = parasIgnorés + 1
-        End If
-
-        ' Met à jour la barre de statut pour donner un retour visuel à l'utilisateur.
-        If i Mod 10 = 0 Then
-            Application.StatusBar = "Analyse du document... Paragraphe " & i & " sur " & docTraduit.Paragraphs.Count
-        End If
-    Next i
-
-    Application.StatusBar = False
-
-    ' --- Fin de l'identification ---
-
-    ' --- Traduction des paragraphes identifiés ---
-    If parasATraduire.Count = 0 Then
-        MsgBox "Aucun paragraphe textuel à traduire n'a été trouvé. Le document est peut-être composé uniquement d'images ou de paragraphes vides.", vbInformation, "Traduction terminée"
-        docTraduit.Close SaveChanges:=False ' Ferme sans sauvegarder si rien n'a été fait
-        Exit Sub
-    End If
+    ' --- Nouvelle Logique de Traduction "au fil de l'eau" ---
 
     Dim startTime As Double
     startTime = Timer
@@ -125,33 +91,57 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     Dim http As Object
     Set http = CreateObject("MSXML2.XMLHTTP.6.0")
 
-    Dim segmentTexte As String
-    Dim parasDuSegment As New Collection
-    Dim traduction As String
+    Dim i As Long
+    Dim parasIgnorés As Long
     Dim parasTraduits As Long
+    Dim segmentTexte As String
+    Dim indicesParasSegment As New Collection
+
+    parasIgnorés = 0
     parasTraduits = 0
 
-    ' Boucle sur les paragraphes à traduire pour créer des segments
-    For i = 1 To parasATraduire.Count
-        Set para = parasATraduire(i)
+    ' Boucle unique qui parcourt tout le document une seule fois.
+    For i = 1 To docTraduit.Paragraphs.Count
 
-        ' Ajoute le paragraphe et son texte au segment en cours
-        parasDuSegment.Add para
-        ' Utilise un séparateur unique pour que l'IA le préserve
-        segmentTexte = segmentTexte & para.Range.Text & "[|||]"
+        Dim para As Paragraph
+        Set para = docTraduit.Paragraphs(i)
 
-        ' Vérifie si le segment atteint la taille maximale ou si c'est le dernier paragraphe
-        If Len(segmentTexte) > maxSegment Or i = parasATraduire.Count Then
+        Dim estDernierPara As Boolean
+        estDernierPara = (i = docTraduit.Paragraphs.Count)
+
+        Dim contientImage As Boolean
+        contientImage = (para.Range.InlineShapes.Count > 0 Or para.Range.ShapeRange.Count > 0)
+
+        Dim estTexteVide As Boolean
+        estTexteVide = (Len(Trim(para.Range.Text)) <= 1)
+
+        ' Condition pour traiter le segment accumulé :
+        ' 1. On rencontre une image
+        ' 2. On a atteint la taille max
+        ' 3. C'est le dernier paragraphe
+        Dim declencherTraduction As Boolean
+        declencherTraduction = contientImage Or Len(segmentTexte) > maxSegment Or estDernierPara
+
+        If Not contientImage And Not estTexteVide Then
+            ' Si c'est du texte, on l'ajoute au segment.
+            indicesParasSegment.Add i
+            segmentTexte = segmentTexte & para.Range.Text & "[|||]"
+        Else
+            parasIgnorés = parasIgnorés + 1
+        End If
+
+        If declencherTraduction And Len(segmentTexte) > 0 Then
 
             ' Met à jour la barre de statut
             Dim pourcentage As Long
-            pourcentage = CLng((i / parasATraduire.Count) * 100)
+            pourcentage = CLng((i / docTraduit.Paragraphs.Count) * 100)
             Application.StatusBar = "Traduction en cours... " & pourcentage & "%"
 
-            ' Enlève le dernier séparateur avant d'envoyer
+            ' Enlève le dernier séparateur
             segmentTexte = Left(segmentTexte, Len(segmentTexte) - 5)
 
-            ' Appel à l'API pour la traduction
+            ' Traduit le segment
+            Dim traduction As String
             traduction = TraduireSegment_Optimise(segmentTexte, apiKey, http)
 
             If Left(traduction, 8) = "(Erreur" Then
@@ -160,13 +150,13 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
                 GoTo FinMacro
             End If
 
-            ' Remplace le texte original par le texte traduit
-            RemplacerTexteParagraphes parasDuSegment, traduction
-            parasTraduits = parasTraduits + parasDuSegment.Count
+            ' Remplace le texte dans le document
+            RemplacerTexteParIndices docTraduit, indicesParasSegment, traduction
+            parasTraduits = parasTraduits + indicesParasSegment.Count
 
-            ' Réinitialise les variables pour le prochain segment
+            ' Réinitialise pour le prochain segment
             segmentTexte = ""
-            Set parasDuSegment = New Collection
+            Set indicesParasSegment = New Collection
         End If
     Next i
 
@@ -177,13 +167,10 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     docTraduit.Save
     docTraduit.Close
 
-    Application.StatusBar = False
-    Application.ScreenUpdating = True
-
     Dim messageFin As String
     messageFin = "Traduction terminée avec succès !" & vbCrLf & vbCrLf & _
                  "• Paragraphes traduits : " & parasTraduits & vbCrLf & _
-                 "• Paragraphes ignorés : " & parasIgnorés & vbCrLf & _
+                 "• Paragraphes ignorés (avec images ou vides) : " & parasIgnorés & vbCrLf & _
                  "• Temps total : " & FormatTemps(tempsTotal) & vbCrLf & vbCrLf & _
                  "Le document traduit a été sauvegardé sous :" & vbCrLf & nouveauNom
 
@@ -344,32 +331,65 @@ Private Function FormatTemps(ByVal secondes As Long) As String
 End Function
 
 '----------------------------------------------------
-' REMPLACEMENT DU TEXTE DANS LES PARAGRAPHES CIBLES
+' REMPLACEMENT DU TEXTE PAR INDICES DE PARAGRAPHES
 '----------------------------------------------------
-Private Sub RemplacerTexteParagraphes(ByVal paras As Collection, ByVal traduction As String)
-    ' Sépare la traduction en utilisant le même délimiteur qu'à l'envoi.
+Private Sub RemplacerTexteParIndices(ByVal doc As Document, ByVal indices As Collection, ByVal traduction As String)
+    On Error GoTo GestionErreurRemplacement
+
     Dim traductions() As String
     traductions = Split(traduction, "[|||]")
 
+    ' Le parcours en sens inverse est la clé pour éviter l'erreur 438.
+    ' En modifiant les paragraphes de la fin vers le début, on ne décale pas
+    ' les indices des paragraphes qui n'ont pas encore été traités.
     Dim i As Long
-    ' Boucle en sens inverse pour éviter l'erreur 438.
-    ' En modifiant le document de la fin vers le début, les indices des paragraphes
-    ' non encore traités ne sont pas affectés par les modifications.
-    For i = paras.Count To 1 Step -1
-        If i - 1 <= UBound(traductions) Then
-            Dim para As Paragraph
-            Set para = paras(i)
+    For i = indices.Count To 1 Step -1
 
-            ' S'assure que le paragraphe est toujours valide avant de le modifier.
-            If Not para Is Nothing Then
+        If i - 1 <= UBound(traductions) Then
+            Dim paraIndex As Long
+            paraIndex = indices(i)
+
+            ' Vérifie si l'indice est toujours valide dans le document.
+            If paraIndex <= doc.Paragraphs.Count Then
+                Dim para As Paragraph
+                Set para = doc.Paragraphs(paraIndex)
+
+                ' Supprime l'ancien texte tout en conservant le style.
                 If para.Range.Characters.Count > 1 Then
-                    ' Supprime le contenu existant tout en préservant la marque de paragraphe et son style.
                     para.Range.Characters(1, para.Range.Characters.Count - 1).Delete
                 End If
 
-                ' Insère le texte traduit au début du paragraphe vide.
-                para.Range.InsertBefore Trim(traductions(i - 1))
+                ' Nettoie le texte traduit et l'insère.
+                para.Range.InsertBefore CleanTranslatedText(traductions(i - 1))
             End If
         End If
     Next i
+
+    Exit Sub
+
+GestionErreurRemplacement:
+    ' Gère une erreur éventuelle lors du remplacement.
+    MsgBox "Une erreur est survenue lors de la mise à jour du document." & vbCrLf & _
+           "Erreur: " & Err.Description, vbCritical
 End Sub
+
+'----------------------------------------------------
+' NETTOYAGE DU TEXTE TRADUIT
+'----------------------------------------------------
+Private Function CleanTranslatedText(ByVal text As String) As String
+    ' Supprime les espaces de début et de fin.
+    Dim cleanedText As String
+    cleanedText = Trim(text)
+
+    ' Supprime la marque de paragraphe finale si l'API en a ajouté une.
+    ' C'est la cause probable de la création de paragraphes vides
+    ' qui corrompait la structure du document.
+    If Len(cleanedText) > 0 Then
+        If Right(cleanedText, 1) = Chr(13) Then
+            cleanedText = Left(cleanedText, Len(cleanedText) - 1)
+        End If
+    End If
+
+    ' Retourne le texte nettoyé après un dernier trim.
+    CleanTranslatedText = Trim(cleanedText)
+End Function
