@@ -1,4 +1,3 @@
-Attribute VB_Name = "Module76"
 Rem Module 76
 ' TRADUCTION SÉCURISÉE AVEC CONSERVATION DES IMAGES ET FORMES
 ' Crée une copie du document et ne traduit que le texte,
@@ -188,18 +187,20 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     Next i
 
     For i = LBound(keys) To UBound(keys)
-        paraIndex = keys(i) ' Assignation (pas de déclaration).
-        Set para = docTraduit.Paragraphs(paraIndex)
+        paraIndex = keys(i)
 
-        If para.Range.Characters.Count > 1 Then
-            ' Méthode correcte pour supprimer le texte sans supprimer le paragraphe.
-            ' On définit une plage qui va du début du paragraphe jusqu'au caractère
-            ' qui précède la marque de fin de paragraphe, puis on la supprime.
-            Dim rngToDelete As Range
-            Set rngToDelete = docTraduit.Range(Start:=para.Range.Start, End:=para.Range.End - 1)
-            rngToDelete.Delete
+        ' Vérifie si le paragraphe existe toujours.
+        If paraIndex <= docTraduit.Paragraphs.Count Then
+            Set para = docTraduit.Paragraphs(paraIndex)
+
+            ' Définit une plage qui couvre tout le contenu du paragraphe SAUF la marque de fin.
+            ' C'est la méthode la plus sûre pour remplacer du texte.
+            Dim contentRange As Range
+            Set contentRange = docTraduit.Range(Start:=para.Range.Start, End:=para.Range.End - 1)
+
+            ' Remplace directement le texte de cette plage.
+            contentRange.Text = translationsDict(paraIndex)
         End If
-        para.Range.InsertBefore translationsDict(paraIndex)
     Next i
 
     ' --- Finalisation ---
