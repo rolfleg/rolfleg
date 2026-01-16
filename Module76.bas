@@ -192,7 +192,12 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
         Set para = docTraduit.Paragraphs(paraIndex)
 
         If para.Range.Characters.Count > 1 Then
-            para.Range.Characters(1, para.Range.Characters.Count - 1).Delete
+            ' Méthode correcte pour supprimer le texte sans supprimer le paragraphe.
+            ' On définit une plage qui va du début du paragraphe jusqu'au caractère
+            ' qui précède la marque de fin de paragraphe, puis on la supprime.
+            Dim rngToDelete As Range
+            Set rngToDelete = docTraduit.Range(Start:=para.Range.Start, End:=para.Range.End - 1)
+            rngToDelete.Delete
         End If
         para.Range.InsertBefore translationsDict(paraIndex)
     Next i
