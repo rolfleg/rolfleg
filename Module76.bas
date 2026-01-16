@@ -82,20 +82,19 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     ' Copie le document source et travaille sur la copie.
     Set docTraduit = docSource.SaveAs2(FileName:=nouveauNom, AddToRecentFiles:=False)
 
-    ' --- Architecture en 3 Phases : Lecture, Traduction, Écriture ---
+    ' --- Architecture Finale : "Cartographie" par Position de Caractères ---
 
     Dim startTime As Double
     startTime = Timer
 
-    ' --- PHASE 1: LECTURE SEULE ---
-    ' On parcourt le document une seule fois pour collecter les informations
-    ' sur les paragraphes à traduire, sans faire aucune modification.
-    Application.StatusBar = "Phase 1/3 : Analyse du document..."
+    ' --- PHASE 1: LECTURE ET CARTOGRAPHIE ---
+    ' On parcourt le document pour "cartographier" les plages de texte à traduire
+    ' en stockant leurs positions de début et de fin. Aucune modification.
+    Application.StatusBar = "Phase 1/3 : Cartographie du document..."
 
-    Dim parasATraduireInfo As New Collection
+    Dim rangesInfo As New Collection
     Dim parasIgnorés As Long: parasIgnorés = 0
     Dim i As Long
-    Dim paraIndex As Long ' Déclaration unique pour éviter l'erreur.
 
     For i = 1 To docTraduit.Paragraphs.Count
         Dim para As Paragraph
@@ -104,42 +103,42 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
         If para.Range.InlineShapes.Count > 0 Or para.Range.ShapeRange.Count > 0 Or Len(Trim(para.Range.Text)) <= 1 Then
             parasIgnorés = parasIgnorés + 1
         Else
-            ' Stocke un Array contenant l'index et le texte original.
-            parasATraduireInfo.Add Array(i, para.Range.Text)
+            Dim textToTranslate As String
+            ' On récupère explicitement le texte de la plage "cartographiée" (sans le marqueur de fin)
+            ' pour s'assurer que le texte envoyé à la traduction correspond exactement à la plage
+            ' qui sera modifiée plus tard.
+            textToTranslate = docTraduit.Range(Start:=para.Range.Start, End:=para.Range.End - 1).Text
+
+            ' Stocke un Array: {PositionDébut, PositionFin, TexteÀTraduire}
+            rangesInfo.Add Array(para.Range.Start, para.Range.End - 1, textToTranslate)
         End If
     Next i
 
-    If parasATraduireInfo.Count = 0 Then
+    If rangesInfo.Count = 0 Then
         MsgBox "Aucun paragraphe textuel à traduire n'a été trouvé.", vbInformation, "Traduction terminée"
         docTraduit.Close SaveChanges:=False
         GoTo FinMacro
     End If
 
     ' --- PHASE 2: TRADUCTION (HORS DOCUMENT) ---
-    ' On travaille uniquement sur les données en mémoire pour la traduction.
     Application.StatusBar = "Phase 2/3 : Traduction du texte..."
 
-    Dim translationsDict As Object
-    Set translationsDict = CreateObject("Scripting.Dictionary")
+    Dim translations As New Collection
 
     Dim http As Object
     Set http = CreateObject("MSXML2.XMLHTTP.6.0")
 
     Dim segmentTexte As String
-    Dim indicesParasSegment As New Collection
 
-    For i = 1 To parasATraduireInfo.Count
-        Dim paraInfo As Variant: paraInfo = parasATraduireInfo(i)
-        paraIndex = paraInfo(0) ' Assignation (pas de déclaration).
-        Dim paraTexte As String: paraTexte = paraInfo(1)
+    For i = 1 To rangesInfo.Count
+        Dim rangeInfo As Variant: rangeInfo = rangesInfo(i)
+        Dim paraTexte As String: paraTexte = rangeInfo(2)
 
-        indicesParasSegment.Add paraIndex
         segmentTexte = segmentTexte & paraTexte & "[|||]"
 
-        ' Déclenche la traduction si le segment est plein ou si c'est la fin.
-        If Len(segmentTexte) > maxSegment Or i = parasATraduireInfo.Count Then
+        If Len(segmentTexte) > maxSegment Or i = rangesInfo.Count Then
             Dim pourcentage As Long
-            pourcentage = CLng((i / parasATraduireInfo.Count) * 100)
+            pourcentage = CLng((i / rangesInfo.Count) * 100)
             Application.StatusBar = "Phase 2/3 : Traduction en cours... " & pourcentage & "%"
 
             segmentTexte = Left(segmentTexte, Len(segmentTexte) - 5)
@@ -156,57 +155,38 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
             Dim traductionsSegment() As String
             traductionsSegment = Split(traduction, "[|||]")
 
-            ' Stocke les traductions dans le dictionnaire.
             Dim j As Long
             For j = 0 To UBound(traductionsSegment)
-                If j < indicesParasSegment.Count Then
-                    translationsDict.Add key:=indicesParasSegment(j + 1), item:=CleanTranslatedText(traductionsSegment(j))
-                End If
+                translations.Add CleanTranslatedText(traductionsSegment(j))
             Next j
 
             segmentTexte = ""
-            Set indicesParasSegment = New Collection
         End If
     Next i
 
-    ' --- PHASE 3: ÉCRITURE SEULE (EN ORDRE INVERSE) ---
-    ' On modifie le document en une seule passe, de la fin vers le début,
-    ' pour garantir une stabilité maximale.
+    ' --- PHASE 3: ÉCRITURE PAR POSITION (INVERSE) ---
+    ' On remplace le texte en utilisant les positions de caractères,
+    ' de la fin vers le début, pour une stabilité maximale.
     Application.StatusBar = "Phase 3/3 : Mise à jour du document..."
 
-    Dim keys As Variant: keys = translationsDict.keys
+    ' Boucle inverse, de la dernière plage à la première.
+    For i = rangesInfo.Count To 1 Step -1
+        Dim rangeInfo As Variant: rangeInfo = rangesInfo(i)
+        Dim startPos As Long: startPos = rangeInfo(0)
+        Dim endPos As Long: endPos = rangeInfo(1)
 
-    ' Tri simple des clés en ordre décroissant.
-    Dim k As Long, temp As Variant
-    For i = LBound(keys) To UBound(keys) - 1
-        For k = i + 1 To UBound(keys)
-            If keys(i) < keys(k) Then
-                temp = keys(i): keys(i) = keys(k): keys(k) = temp
-            End If
-        Next k
-    Next i
+        ' Crée une plage basée sur les positions "cartographiées".
+        Dim contentRange As Range
+        Set contentRange = docTraduit.Range(Start:=startPos, End:=endPos)
 
-    For i = LBound(keys) To UBound(keys)
-        paraIndex = keys(i)
-
-        ' Vérifie si le paragraphe existe toujours.
-        If paraIndex <= docTraduit.Paragraphs.Count Then
-            Set para = docTraduit.Paragraphs(paraIndex)
-
-            ' Définit une plage qui couvre tout le contenu du paragraphe SAUF la marque de fin.
-            ' C'est la méthode la plus sûre pour remplacer du texte.
-            Dim contentRange As Range
-            Set contentRange = docTraduit.Range(Start:=para.Range.Start, End:=para.Range.End - 1)
-
-            ' Remplace directement le texte de cette plage.
-            contentRange.Text = translationsDict(paraIndex)
-        End If
+        ' Remplace le texte.
+        contentRange.Text = translations(i)
     Next i
 
     ' --- Finalisation ---
     Dim tempsTotal As Long
     tempsTotal = CLng(Timer - startTime)
-    Dim parasTraduits As Long: parasTraduits = translationsDict.Count
+    Dim parasTraduits As Long: parasTraduits = rangesInfo.Count
 
     docTraduit.Save
     docTraduit.Close
