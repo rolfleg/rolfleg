@@ -83,64 +83,67 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     ' Copie le document source et travaille sur la copie.
     Set docTraduit = docSource.SaveAs2(FileName:=nouveauNom, AddToRecentFiles:=False)
 
-    ' --- Nouvelle Logique de Traduction "au fil de l'eau" ---
+    ' --- Architecture en 3 Phases : Lecture, Traduction, Écriture ---
 
     Dim startTime As Double
     startTime = Timer
 
-    Dim http As Object
-    Set http = CreateObject("MSXML2.XMLHTTP.6.0")
+    ' --- PHASE 1: LECTURE SEULE ---
+    ' On parcourt le document une seule fois pour collecter les informations
+    ' sur les paragraphes à traduire, sans faire aucune modification.
+    Application.StatusBar = "Phase 1/3 : Analyse du document..."
 
+    Dim parasATraduireInfo As New Collection
+    Dim parasIgnorés As Long: parasIgnorés = 0
     Dim i As Long
-    Dim parasIgnorés As Long
-    Dim parasTraduits As Long
-    Dim segmentTexte As String
-    Dim indicesParasSegment As New Collection
 
-    parasIgnorés = 0
-    parasTraduits = 0
-
-    ' Boucle unique qui parcourt tout le document une seule fois.
     For i = 1 To docTraduit.Paragraphs.Count
-
         Dim para As Paragraph
         Set para = docTraduit.Paragraphs(i)
 
-        Dim estDernierPara As Boolean
-        estDernierPara = (i = docTraduit.Paragraphs.Count)
-
-        Dim contientImage As Boolean
-        contientImage = (para.Range.InlineShapes.Count > 0 Or para.Range.ShapeRange.Count > 0)
-
-        Dim estTexteVide As Boolean
-        estTexteVide = (Len(Trim(para.Range.Text)) <= 1)
-
-        ' Condition pour traiter le segment accumulé :
-        ' 1. On rencontre une image
-        ' 2. On a atteint la taille max
-        ' 3. C'est le dernier paragraphe
-        Dim declencherTraduction As Boolean
-        declencherTraduction = contientImage Or Len(segmentTexte) > maxSegment Or estDernierPara
-
-        If Not contientImage And Not estTexteVide Then
-            ' Si c'est du texte, on l'ajoute au segment.
-            indicesParasSegment.Add i
-            segmentTexte = segmentTexte & para.Range.Text & "[|||]"
-        Else
+        If para.Range.InlineShapes.Count > 0 Or para.Range.ShapeRange.Count > 0 Or Len(Trim(para.Range.Text)) <= 1 Then
             parasIgnorés = parasIgnorés + 1
+        Else
+            ' Stocke un Array contenant l'index et le texte original.
+            parasATraduireInfo.Add Array(i, para.Range.Text)
         End If
+    Next i
 
-        If declencherTraduction And Len(segmentTexte) > 0 Then
+    If parasATraduireInfo.Count = 0 Then
+        MsgBox "Aucun paragraphe textuel à traduire n'a été trouvé.", vbInformation, "Traduction terminée"
+        docTraduit.Close SaveChanges:=False
+        GoTo FinMacro
+    End If
 
-            ' Met à jour la barre de statut
+    ' --- PHASE 2: TRADUCTION (HORS DOCUMENT) ---
+    ' On travaille uniquement sur les données en mémoire pour la traduction.
+    Application.StatusBar = "Phase 2/3 : Traduction du texte..."
+
+    Dim translationsDict As Object
+    Set translationsDict = CreateObject("Scripting.Dictionary")
+
+    Dim http As Object
+    Set http = CreateObject("MSXML2.XMLHTTP.6.0")
+
+    Dim segmentTexte As String
+    Dim indicesParasSegment As New Collection
+
+    For i = 1 To parasATraduireInfo.Count
+        Dim paraInfo As Variant: paraInfo = parasATraduireInfo(i)
+        Dim paraIndex As Long: paraIndex = paraInfo(0)
+        Dim paraTexte As String: paraTexte = paraInfo(1)
+
+        indicesParasSegment.Add paraIndex
+        segmentTexte = segmentTexte & paraTexte & "[|||]"
+
+        ' Déclenche la traduction si le segment est plein ou si c'est la fin.
+        If Len(segmentTexte) > maxSegment Or i = parasATraduireInfo.Count Then
             Dim pourcentage As Long
-            pourcentage = CLng((i / docTraduit.Paragraphs.Count) * 100)
-            Application.StatusBar = "Traduction en cours... " & pourcentage & "%"
+            pourcentage = CLng((i / parasATraduireInfo.Count) * 100)
+            Application.StatusBar = "Phase 2/3 : Traduction en cours... " & pourcentage & "%"
 
-            ' Enlève le dernier séparateur
             segmentTexte = Left(segmentTexte, Len(segmentTexte) - 5)
 
-            ' Traduit le segment
             Dim traduction As String
             traduction = TraduireSegment_Optimise(segmentTexte, apiKey, http)
 
@@ -150,19 +153,53 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
                 GoTo FinMacro
             End If
 
-            ' Remplace le texte dans le document
-            RemplacerTexteParIndices docTraduit, indicesParasSegment, traduction
-            parasTraduits = parasTraduits + indicesParasSegment.Count
+            Dim traductionsSegment() As String
+            traductionsSegment = Split(traduction, "[|||]")
 
-            ' Réinitialise pour le prochain segment
+            ' Stocke les traductions dans le dictionnaire.
+            Dim j As Long
+            For j = 0 To UBound(traductionsSegment)
+                If j < indicesParasSegment.Count Then
+                    translationsDict.Add key:=indicesParasSegment(j + 1), item:=CleanTranslatedText(traductionsSegment(j))
+                End If
+            Next j
+
             segmentTexte = ""
             Set indicesParasSegment = New Collection
         End If
     Next i
 
+    ' --- PHASE 3: ÉCRITURE SEULE (EN ORDRE INVERSE) ---
+    ' On modifie le document en une seule passe, de la fin vers le début,
+    ' pour garantir une stabilité maximale.
+    Application.StatusBar = "Phase 3/3 : Mise à jour du document..."
+
+    Dim keys As Variant: keys = translationsDict.keys
+
+    ' Tri simple des clés en ordre décroissant.
+    Dim k As Long, temp As Variant
+    For i = LBound(keys) To UBound(keys) - 1
+        For k = i + 1 To UBound(keys)
+            If keys(i) < keys(k) Then
+                temp = keys(i): keys(i) = keys(k): keys(k) = temp
+            End If
+        Next k
+    Next i
+
+    For i = LBound(keys) To UBound(keys)
+        Dim paraIndex As Long: paraIndex = keys(i)
+        Set para = docTraduit.Paragraphs(paraIndex)
+
+        If para.Range.Characters.Count > 1 Then
+            para.Range.Characters(1, para.Range.Characters.Count - 1).Delete
+        End If
+        para.Range.InsertBefore translationsDict(paraIndex)
+    Next i
+
     ' --- Finalisation ---
     Dim tempsTotal As Long
     tempsTotal = CLng(Timer - startTime)
+    Dim parasTraduits As Long: parasTraduits = translationsDict.Count
 
     docTraduit.Save
     docTraduit.Close
@@ -330,48 +367,6 @@ Private Function FormatTemps(ByVal secondes As Long) As String
     End If
 End Function
 
-'----------------------------------------------------
-' REMPLACEMENT DU TEXTE PAR INDICES DE PARAGRAPHES
-'----------------------------------------------------
-Private Sub RemplacerTexteParIndices(ByVal doc As Document, ByVal indices As Collection, ByVal traduction As String)
-    On Error GoTo GestionErreurRemplacement
-
-    Dim traductions() As String
-    traductions = Split(traduction, "[|||]")
-
-    ' Le parcours en sens inverse est la clé pour éviter l'erreur 438.
-    ' En modifiant les paragraphes de la fin vers le début, on ne décale pas
-    ' les indices des paragraphes qui n'ont pas encore été traités.
-    Dim i As Long
-    For i = indices.Count To 1 Step -1
-
-        If i - 1 <= UBound(traductions) Then
-            Dim paraIndex As Long
-            paraIndex = indices(i)
-
-            ' Vérifie si l'indice est toujours valide dans le document.
-            If paraIndex <= doc.Paragraphs.Count Then
-                Dim para As Paragraph
-                Set para = doc.Paragraphs(paraIndex)
-
-                ' Supprime l'ancien texte tout en conservant le style.
-                If para.Range.Characters.Count > 1 Then
-                    para.Range.Characters(1, para.Range.Characters.Count - 1).Delete
-                End If
-
-                ' Nettoie le texte traduit et l'insère.
-                para.Range.InsertBefore CleanTranslatedText(traductions(i - 1))
-            End If
-        End If
-    Next i
-
-    Exit Sub
-
-GestionErreurRemplacement:
-    ' Gère une erreur éventuelle lors du remplacement.
-    MsgBox "Une erreur est survenue lors de la mise à jour du document." & vbCrLf & _
-           "Erreur: " & Err.Description, vbCritical
-End Sub
 
 '----------------------------------------------------
 ' NETTOYAGE DU TEXTE TRADUIT (VERSION ROBUSTE)
