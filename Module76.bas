@@ -374,22 +374,17 @@ GestionErreurRemplacement:
 End Sub
 
 '----------------------------------------------------
-' NETTOYAGE DU TEXTE TRADUIT
+' NETTOYAGE DU TEXTE TRADUIT (VERSION ROBUSTE)
 '----------------------------------------------------
 Private Function CleanTranslatedText(ByVal text As String) As String
-    ' Supprime les espaces de début et de fin.
+    ' Remplace TOUS les sauts de paragraphe (Chr(13)) par un espace.
+    ' C'est la correction la plus critique : l'API peut insérer des sauts
+    ' de paragraphe au milieu du texte, ce qui scinde un paragraphe en deux,
+    ' corrompt la structure du document et provoque l'erreur 438.
+    ' Cette ligne garantit que la structure des paragraphes reste stable.
     Dim cleanedText As String
-    cleanedText = Trim(text)
+    cleanedText = Replace(text, Chr(13), " ")
 
-    ' Supprime la marque de paragraphe finale si l'API en a ajouté une.
-    ' C'est la cause probable de la création de paragraphes vides
-    ' qui corrompait la structure du document.
-    If Len(cleanedText) > 0 Then
-        If Right(cleanedText, 1) = Chr(13) Then
-            cleanedText = Left(cleanedText, Len(cleanedText) - 1)
-        End If
-    End If
-
-    ' Retourne le texte nettoyé après un dernier trim.
+    ' Supprime les espaces superflus au début et à la fin.
     CleanTranslatedText = Trim(cleanedText)
 End Function
