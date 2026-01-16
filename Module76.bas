@@ -129,9 +129,10 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     Set http = CreateObject("MSXML2.XMLHTTP.6.0")
 
     Dim segmentTexte As String
+    Dim rangeInfo As Variant
 
     For i = 1 To rangesInfo.Count
-        Dim rangeInfo As Variant: rangeInfo = rangesInfo(i)
+        rangeInfo = rangesInfo(i)
         Dim paraTexte As String: paraTexte = rangeInfo(2)
 
         segmentTexte = segmentTexte & paraTexte & "[|||]"
@@ -171,7 +172,7 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
 
     ' Boucle inverse, de la dernière plage à la première.
     For i = rangesInfo.Count To 1 Step -1
-        Dim rangeInfo As Variant: rangeInfo = rangesInfo(i)
+        rangeInfo = rangesInfo(i)
         Dim startPos As Long: startPos = rangeInfo(0)
         Dim endPos As Long: endPos = rangeInfo(1)
 
