@@ -96,6 +96,7 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     Dim parasATraduireInfo As New Collection
     Dim parasIgnorés As Long: parasIgnorés = 0
     Dim i As Long
+    Dim paraIndex As Long ' Déclaration unique pour éviter l'erreur.
 
     For i = 1 To docTraduit.Paragraphs.Count
         Dim para As Paragraph
@@ -130,7 +131,7 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
 
     For i = 1 To parasATraduireInfo.Count
         Dim paraInfo As Variant: paraInfo = parasATraduireInfo(i)
-        Dim paraIndex As Long: paraIndex = paraInfo(0)
+        paraIndex = paraInfo(0) ' Assignation (pas de déclaration).
         Dim paraTexte As String: paraTexte = paraInfo(1)
 
         indicesParasSegment.Add paraIndex
@@ -187,7 +188,7 @@ Public Sub TraduireDocument_OpenAI_Word_Module76()
     Next i
 
     For i = LBound(keys) To UBound(keys)
-        Dim paraIndex As Long: paraIndex = keys(i)
+        paraIndex = keys(i) ' Assignation (pas de déclaration).
         Set para = docTraduit.Paragraphs(paraIndex)
 
         If para.Range.Characters.Count > 1 Then
