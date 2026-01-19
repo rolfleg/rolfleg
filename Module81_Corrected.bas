@@ -265,36 +265,43 @@ Function EstMajuscule(c As String) As Boolean
 End Function
 
 ' ================================================================
-'     Chargement du dictionnaire des Noms Propres
+'     Chargement du dictionnaire des Noms Propres (Version Corrigée pour LibreOffice)
 ' ================================================================
 Function CharpZEAWYtiB6bJ16NuLbGCc6CZ6jJdKfb63() As Object
     Dim d As Object
-    Set d = CreateObject("Scripting.Dictionary")
+    d = CreateObject("Scripting.Dictionary") ' Compatible avec LO sur Windows
     d.CompareMode = 1 ' Mode insensible à la casse
 
     Dim sChemin As String
     sChemin = "C:\Users\jeanp\AppData\Roaming\LibreOffice\4\user\wordbook\noms propres.dic"
+    Dim sUrl As String
+    sUrl = ConvertToURL(sChemin)
 
-    Dim oFSO As Object
-    Set oFSO = CreateObject("Scripting.FileSystemObject")
+    Dim oSFA As Object
+    oSFA = createUnoService("com.sun.star.ucb.SimpleFileAccess")
 
-    If Not oFSO.FileExists(sChemin) Then
+    If Not oSFA.exists(sUrl) Then
         MsgBox "Le fichier dictionnaire '" & sChemin & "' n'a pas été trouvé.", 48, "Avertissement"
-        Set CharpZEAWYtiB6bJ16NuLbGCc6CZ6jJdKfb63 = d
+        CharpZEAWYtiB6bJ16NuLbGCc6CZ6jJdKfb63 = d
         Exit Function
     End If
 
-    Dim f As Integer
-    f = FreeFile()
+    Dim oInputStream As Object
+    Dim oTextStream As Object
     Dim ligne As String
 
     On Error GoTo ErrorHandler
 
-    Open sChemin For Input Access Read As #f
-    Do While Not EOF(f)
-        Line Input #f, ligne
+    oInputStream = oSFA.openFileRead(sUrl)
+    oTextStream = createUnoService("com.sun.star.io.TextInputStream")
+    oTextStream.setInputStream(oInputStream)
+    oTextStream.setEncoding("UTF-8") ' Encodage standard
+
+    Do While Not oTextStream.isEOF()
+        ligne = oTextStream.readLine()
         ligne = Trim(ligne)
         If Len(ligne) > 0 Then
+            ' Ignorer les en-têtes ou métadonnées du dictionnaire
             If Left(ligne, 1) <> "[" And InStr(ligne, ":") = 0 Then
                 If Not d.Exists(UCase(ligne)) Then
                     d.Add UCase(ligne), 1
@@ -302,13 +309,18 @@ Function CharpZEAWYtiB6bJ16NuLbGCc6CZ6jJdKfb63() As Object
             End If
         End If
     Loop
-    Close #f
 
-    Set CharpZEAWYtiB6bJ16NuLbGCc6CZ6jJdKfb63 = d
+    ' Fermer les flux
+    oTextStream.closeInput()
+    oInputStream.closeInput()
+
+    CharpZEAWYtiB6bJ16NuLbGCc6CZ6jJdKfb63 = d
     Exit Function
 
 ErrorHandler:
-    MsgBox "Erreur lors de la lecture du fichier dictionnaire.", 16, "Erreur"
-    If f > 0 Then Close #f
-    Set CharpZEAWYtiB6bJ16NuLbGCc6CZ6jJdKfb63 = d
+    MsgBox "Erreur lors de la lecture du fichier dictionnaire : " & Err.Description, 16, "Erreur"
+    On Error Resume Next ' Empêche une erreur dans le gestionnaire d'erreur
+    If Not IsNull(oTextStream) Then oTextStream.closeInput()
+    If Not IsNull(oInputStream) Then oInputStream.closeInput()
+    CharpZEAWYtiB6bJ16NuLbGCc6CZ6jJdKfb63 = d
 End Function
