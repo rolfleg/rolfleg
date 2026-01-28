@@ -1,0 +1,18 @@
+Bonjour,
+
+Voici un texte de test pour la macro de ponctuation.
+
+Règle 1 (Nom propre) : Le logiciel a été créé par Microsoft. C'est un bon produit.
+Règle 2 (Minuscule-minuscule) : Il faut corriger ce point. inutile entre deux mots.
+Règle 3 (Majuscule non propre) : La macro fonctionne bien Maintenant, il faut la tester.
+Règle 4 (Fusion de paragraphes) : C'est la fin du premier paragraphe.
+le second commence ici et devrait être fusionné.
+
+Un autre cas pour la Règle 4 :
+Il a terminé son discours.
+«Merci à tous !» a-t-il conclu.
+
+Cas complexe (ne doit pas changer) : J'ai vu M. Dupont.
+Cas limite (ne doit pas changer) : C'est la fin de la phrase. Le début de la suivante.
+
+Merci.
