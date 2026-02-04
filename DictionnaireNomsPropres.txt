@@ -1,0 +1,4 @@
+# Ajoutez ici les noms propres à ignorer par les macros de ponctuation (un par ligne).
+Jean-Claude
+Microsoft
+Paris
